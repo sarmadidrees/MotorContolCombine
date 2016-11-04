@@ -52,10 +52,22 @@ unsigned long previousMillis = 0;
 const long interval = 10;
 
 float totalDistance = 0;
-boolean right = false;
-boolean left = false;
 double travelDist = 0;
+boolean doneRotate = false;
+boolean doneStraight = false;
 
+struct motorPWM{
+  double pwm1;
+  double pwm2;
+  double rest;
+};
+motorPWM rotateRight;
+motorPWM rotateLeft;
+
+const int total = 50;
+int errorArray[total];
+int readIndex = 0;
+ 
 void setup() {
   Serial.begin(115200);
   inputString.reserve(100);
@@ -106,13 +118,16 @@ void loop() {
 
     totalDistance += (distance1 + distance2)/2;    //total Distance
   }
-  
+
   pidL.Compute();
   pidR.Compute();
   pidRotate.Compute();
 
   if(pidActiveS)  moveStraight(travelDist);
-  else if (pidActiveR) correctHeading();
+  else if (pidActiveR){
+    updateErrorArray();
+    correctHeading();
+  }
   else{
     motorL.setDir(BRAKE);
     motorR.setDir(BRAKE);
@@ -244,11 +259,16 @@ void interpretSerialData(void){
           c1 = inputString.indexOf(',')+1;
           c2 = inputString.indexOf(',',c1);
           int pwmL = inputString.substring(c1,c2).toInt();
+          rotateRight.pwm1 = pwmL;
+          
           c1 = c2+1;
           c2 = inputString.indexOf(',',c1);
           int pwmR = inputString.substring(c1,c2).toInt();
+          rotateRight.pwm2 = pwmR;
+          
           c1 = c2+1;
           val1 = inputString.substring(c1).toInt(); 
+          rotateRight.rest = val1;
           
           motorL.setDir(FORWARD);
           motorR.setDir(BACKWARD);
@@ -259,11 +279,16 @@ void interpretSerialData(void){
           c1 = inputString.indexOf(',')+1;
           c2 = inputString.indexOf(',',c1);
           int pwmL = inputString.substring(c1,c2).toInt();
+          rotateLeft.pwm1 = pwmL;
+          
           c1 = c2+1;
           c2 = inputString.indexOf(',',c1);
           int pwmR = inputString.substring(c1,c2).toInt();
+          rotateLeft.pwm2 = pwmR;
+          
           c1 = c2+1;
           val1 = inputString.substring(c1).toInt(); 
+          rotateLeft.rest = val1;
           
           motorL.setDir(BACKWARD);
           motorR.setDir(FORWARD);
@@ -290,12 +315,44 @@ void interpretSerialData(void){
         break;
       
       case 'X':
-        // COMMAND: I\n
+        // COMMAND: X\n
         resetEncoders();
         encoderL = 0;
         encoderR = 0;
         Serial.println('i');
         break;
+      
+      //for path plan
+      case 'C':
+        //COMMAND: C,L1/R1\n   OR   C,S\n
+        if(inputString[2] == 'L'){
+          motorL.setDir(BACKWARD);
+          motorR.setDir(FORWARD);
+          
+          if(inputString[2] == '1'){
+            rotatePWM(rotateLeft.pwm1,rotateLeft.pwm1,rotateLeft.rest);  
+          }
+          else if(inputString[2] == '2'){
+            rotatePWM(rotateLeft.pwm1,rotateLeft.pwm1,rotateLeft.rest * 2);  
+          }
+        }
+        else if(inputString[2] == 'R'){
+          motorL.setDir(FORWARD);
+          motorR.setDir(BACKWARD);
+          
+          if(inputString[2] == '1'){
+            rotatePWM(rotateRight.pwm1,rotateRight.pwm1,rotateRight.rest);  
+          }
+          else if(inputString[2] == '2'){
+            rotatePWM(rotateRight.pwm1,rotateRight.pwm1,rotateRight.rest * 2);  
+          }
+        }
+        else if(inputString[2] == 'S'){
+          pidActiveS = true;
+          pidActiveR = false;
+          totalDistance = 0;  
+        }
+      break;
       
       default:
         Serial.print("UNKNOWN COMMAND: ");
@@ -363,6 +420,7 @@ void moveStraight(float steps){
     pidActiveS = false;
     Serial.println("START");    //send this to mega to start sending Megneto readings 
     pidActiveR = true;
+    doneStraight = true;
   }
 }
 
@@ -389,15 +447,29 @@ void correctHeading(){
         motorL.setPWM(pwmRotate);
         motorR.setPWM(pwmRotate);
       }
-    else if ((pidRotate.GetError() < 3) && (pidRotate.GetError() > (-3))){
+    else if ((pidRotate.GetError() < 3) && (pidRotate.GetError() > (-3)) && checkErrorArray){
         motorL.setDir(BRAKE);
         motorR.setDir(BRAKE);
         motorL.setPWM(0);
         motorR.setPWM(0);
         //pidActiveS = true;
-      // Serial.println("STOP");    //send this to mega to stop sending Megneto readings 
-      //  pidActiveR = false;
+        Serial.println("STOP");    //send this to mega to stop sending Megneto readings 
+        delay(10);
+        
+        if(doneStraight) {
+          Serial.println("STRAIGHT");
+          doneStraight = false;
+        }
+        else if (!doneStraight) Serial.println("ROTATE");
+        
+        pidActiveR = false;
         resetEncoders();    //reset encoders
+      }
+    else{
+        motorL.setDir(BRAKE);
+        motorR.setDir(BRAKE);
+        motorL.setPWM(0);
+        motorR.setPWM(0);
       }
 }
 
@@ -413,4 +485,34 @@ void rotatePWM(int pwm1, int pwm2, int val){
   motorL.setPWM(0);
   motorR.setPWM(0);
 
+  pidActiveR = true;
+  pidActiveS = false;
+  Serial.println("START");
 }
+
+void initErrorArray(){
+  for(int i ; i<total; i++){
+    errorArray[i]=9; 
+  }
+}
+
+void updateErrorArray(){
+  errorArray[readIndex] = pidRotate.GetError();
+  readIndex++;
+  if(readIndex >= total) readIndex = 0;
+}
+
+bool checkErrorArray(){
+  int count;
+  for(int i ; i<total; i++){
+    if((errorArray[i]==-2)||(errorArray[i]==-1)||(errorArray[i]==0)||(errorArray[i]==1)||(errorArray[i]==2))
+    {
+      count++; 
+    }
+  }
+
+  if (count >= total) return true;
+  else return false;
+}
+
+
