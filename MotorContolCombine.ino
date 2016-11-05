@@ -175,6 +175,8 @@ void interpretSerialData(void){
           pidR.SetMode(AUTOMATIC);
         else
           pidR.SetMode(MANUAL);
+
+        pidRotate.SetMode(AUTOMATIC);
         pidActiveS = true;
         pidActiveR = false;
         totalDistance = 0;
@@ -243,6 +245,7 @@ void interpretSerialData(void){
         pidActiveR= false;
         pidL.SetMode(MANUAL);
         pidR.SetMode(MANUAL);
+        pidRotate.SetMode(MANUAL);
         pwm1 = val1;
         pwm2 = val2;
         motorL.setPWM(pwm1);
@@ -254,6 +257,7 @@ void interpretSerialData(void){
         break;
       
       case 'G':
+        pidRotate.SetMode(AUTOMATIC);
         if(inputString[2]  == 'R'){
           inputString = inputString.substring(2);
           c1 = inputString.indexOf(',')+1;
@@ -325,14 +329,15 @@ void interpretSerialData(void){
       //for path plan
       case 'C':
         //COMMAND: C,L1/R1\n   OR   C,S\n
+        pidRotate.SetMode(AUTOMATIC);
         if(inputString[2] == 'L'){
           motorL.setDir(BACKWARD);
           motorR.setDir(FORWARD);
           
-          if(inputString[2] == '1'){
+          if(inputString[3] == '1'){
             rotatePWM(rotateLeft.pwm1,rotateLeft.pwm1,rotateLeft.rest);  
           }
-          else if(inputString[2] == '2'){
+          else if(inputString[3] == '2'){
             rotatePWM(rotateLeft.pwm1,rotateLeft.pwm1,rotateLeft.rest * 2);  
           }
         }
@@ -340,17 +345,20 @@ void interpretSerialData(void){
           motorL.setDir(FORWARD);
           motorR.setDir(BACKWARD);
           
-          if(inputString[2] == '1'){
+          if(inputString[3] == '1'){
             rotatePWM(rotateRight.pwm1,rotateRight.pwm1,rotateRight.rest);  
           }
-          else if(inputString[2] == '2'){
+          else if(inputString[3] == '2'){
             rotatePWM(rotateRight.pwm1,rotateRight.pwm1,rotateRight.rest * 2);  
           }
         }
         else if(inputString[2] == 'S'){
+          pidL.SetMode(AUTOMATIC);
+          pidR.SetMode(AUTOMATIC);
           pidActiveS = true;
           pidActiveR = false;
-          totalDistance = 0;  
+          totalDistance = 0;
+          resetEncoders(); 
         }
       break;
       
@@ -418,6 +426,8 @@ void moveStraight(float steps){
     motorR.setPWM(0);
     totalDistance = 0;
     pidActiveS = false;
+    pidL.SetMode(MANUAL);
+    pidR.SetMode(MANUAL);
     Serial.println("START");    //send this to mega to start sending Megneto readings 
     pidActiveR = true;
     doneStraight = true;
@@ -452,6 +462,7 @@ void correctHeading(){
         motorR.setDir(BRAKE);
         motorL.setPWM(0);
         motorR.setPWM(0);
+        pidRotate.SetMode(MANUAL);
         //pidActiveS = true;
         Serial.println("STOP");    //send this to mega to stop sending Megneto readings 
         delay(10);
